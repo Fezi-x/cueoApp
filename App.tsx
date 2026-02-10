@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import {
-  Camera,
+  CameraView,
   CameraType,
   useCameraPermissions,
   useMicrophonePermissions,
@@ -10,11 +10,12 @@ import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 const SCROLL_SPEED_PX_PER_SEC = 18;
 
 export default function App() {
-  const [cameraType, setCameraType] = useState<CameraType>(CameraType.back);
+  const [cameraType, setCameraType] = useState<CameraType>('back');
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const [script, setScript] = useState('');
@@ -22,12 +23,13 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [contentHeight, setContentHeight] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
-  const cameraRef = useRef<Camera | null>(null);
+  const cameraRef = useRef<CameraView | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
   const scrollOffset = useRef(0);
   const lastFrame = useRef<number | null>(null);
   const rafId = useRef<number | null>(null);
   const recordSound = useRef<Audio.Sound | null>(null);
+  const isRecordingRef = useRef(false);
 
   useEffect(() => {
     if (cameraPermission == null) {
@@ -35,7 +37,19 @@ export default function App() {
     }
   }, [cameraPermission, requestCameraPermission]);
 
+  // Preload sound on mount + cleanup on unmount
   useEffect(() => {
+    const loadSound = async () => {
+      try {
+        const sound = new Audio.Sound();
+        await sound.loadAsync(require('./assets/record.wav'));
+        recordSound.current = sound;
+      } catch {
+        // Ignore sound load failures
+      }
+    };
+    loadSound();
+
     return () => {
       if (rafId.current != null) {
         cancelAnimationFrame(rafId.current);
@@ -53,12 +67,7 @@ export default function App() {
 
   const playRecordSound = async () => {
     try {
-      if (!recordSound.current) {
-        const sound = new Audio.Sound();
-        await sound.loadAsync(require('./assets/record.wav'));
-        recordSound.current = sound;
-      }
-      await recordSound.current.replayAsync();
+      await recordSound.current?.replayAsync();
     } catch {
       // Ignore sound failures to avoid blocking recording.
     }
@@ -69,13 +78,14 @@ export default function App() {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   };
 
-  const startAutoScroll = () => {
-    if (maxOffset <= 0) {
-      return;
-    }
+  const startAutoScroll = (currentMaxOffset: number) => {
+    if (currentMaxOffset <= 0) return;
+
     lastFrame.current = null;
+
     const tick = (timestamp: number) => {
-      if (!isRecording) {
+      if (!isRecordingRef.current) {
+        rafId.current = null;
         return;
       }
       if (lastFrame.current == null) {
@@ -85,21 +95,24 @@ export default function App() {
       lastFrame.current = timestamp;
       const nextOffset = Math.min(
         scrollOffset.current + (SCROLL_SPEED_PX_PER_SEC * deltaMs) / 1000,
-        maxOffset
+        currentMaxOffset
       );
       scrollOffset.current = nextOffset;
       scrollRef.current?.scrollTo({ y: nextOffset, animated: false });
-      if (nextOffset < maxOffset) {
+      if (nextOffset < currentMaxOffset) {
         rafId.current = requestAnimationFrame(tick);
+      } else {
+        rafId.current = null;
       }
     };
+
     rafId.current = requestAnimationFrame(tick);
   };
 
   useEffect(() => {
     if (isRecording) {
       resetScroll();
-      startAutoScroll();
+      startAutoScroll(maxOffset);
     } else {
       if (rafId.current != null) {
         cancelAnimationFrame(rafId.current);
@@ -110,47 +123,68 @@ export default function App() {
   }, [isRecording, maxOffset]);
 
   const startRecording = async () => {
-    if (!cameraRef.current || isRecording) {
+    console.log('1. startRecording called');
+    if (!cameraRef.current) {
+      console.log('BAIL: no cameraRef');
+      return;
+    }
+    if (isRecordingRef.current) {
+      console.log('BAIL: already recording');
       return;
     }
 
+    console.log('2. checking camera permission:', cameraPermission?.granted);
     const ensuredCamera = cameraPermission?.granted
       ? { granted: true }
       : await requestCameraPermission();
     if (!ensuredCamera.granted) {
+      console.log('BAIL: camera permission denied');
       return;
     }
 
+    console.log('3. checking mic permission:', micPermission?.granted);
     const ensuredMic = micPermission?.granted
       ? { granted: true }
       : await requestMicPermission();
     if (!ensuredMic.granted) {
+      console.log('BAIL: mic permission denied');
       return;
     }
 
+    console.log('4. checking media library permission');
     const mediaPermission = await MediaLibrary.requestPermissionsAsync();
+    console.log('4')
+    console.log('4a. media permission result:', JSON.stringify(mediaPermission));
     if (!mediaPermission.granted) {
+      console.log('BAIL: media library permission denied');
       return;
     }
 
-    setIsRecording(true);
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await playRecordSound();
+    console.log('5. all permissions granted, starting recording');
     try {
+      isRecordingRef.current = true;
+      setIsRecording(true);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      console.log('6. haptics done, playing sound');
+      await playRecordSound();
+      console.log('7. sound done, calling recordAsync');
       const recording = await cameraRef.current.recordAsync();
+      console.log('8. recordAsync returned:', recording?.uri);
       if (recording?.uri) {
         await MediaLibrary.createAssetAsync(recording.uri);
+        console.log('9. saved to media library');
       }
+    } catch (e) {
+      console.log('ERROR in recording:', e);
     } finally {
+      isRecordingRef.current = false;
       setIsRecording(false);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
 
   const stopRecording = () => {
-    if (!cameraRef.current || !isRecording) {
-      return;
-    }
+    if (!cameraRef.current || !isRecordingRef.current) return;
     cameraRef.current.stopRecording();
   };
 
@@ -183,20 +217,18 @@ export default function App() {
 
         {isGranted && (
           <View className="flex-1">
-            <Camera
+            <CameraView
               ref={cameraRef}
               className="h-full w-full"
-              type={cameraType}
+              facing={cameraType}
             />
             <Pressable
               onPress={() =>
-                setCameraType((prev) =>
-                  prev === CameraType.back ? CameraType.front : CameraType.back
-                )
+                setCameraType((prev) => (prev === 'back' ? 'front' : 'back'))
               }
-              className="absolute right-3 top-3 h-10 w-10 items-center justify-center rounded-full border border-white/50 bg-black/40"
+              className="absolute right-3 top-3 h-10 w-10 items-center justify-center rounded-full"
             >
-              <Text className="text-white text-lg">R</Text>
+              <Ionicons name="camera-reverse" size={30} color="white" />
             </Pressable>
           </View>
         )}
@@ -207,9 +239,9 @@ export default function App() {
         className={script.length === 0 ? 'bg-[#242424] rounded-[20px] px-6 py-5 mt-6' : 'mt-6'}
       >
         {script.length === 0 ? (
-          <Text className="text-white text-xl text-center">Tap to add your script</Text>
+          <Text className="text-yellow-500/30 text-xl text-center">Tap to add your script</Text>
         ) : (
-          <View className="h-[200px]">
+          <View className="h-[120px]">
             <ScrollView
               ref={(ref) => {
                 scrollRef.current = ref;
@@ -235,7 +267,7 @@ export default function App() {
       <View className="flex-1 items-center justify-end pb-12">
         <Pressable
           onPress={isRecording ? stopRecording : startRecording}
-          className="h-20 w-20 items-center justify-center rounded-full border-2 border-white"
+          className="h-20 w-20 items-center justify-center rounded-full border border-white"
         >
           <View
             className={
@@ -253,9 +285,9 @@ export default function App() {
             <Text className="text-white text-lg">Edit Script</Text>
             <Pressable
               onPress={() => setIsEditing(false)}
-              className="px-3 py-1 rounded-full border border-white/30"
+              className="px-3 py-1 rounded-full border border-yellow-500"
             >
-              <Text className="text-white text-sm">Done</Text>
+              <Text className="text-yellow-500 text-sm">Done</Text>
             </Pressable>
           </View>
           <View className="flex-1 px-5 pb-10">
@@ -265,7 +297,7 @@ export default function App() {
               multiline
               placeholder="Paste your script..."
               placeholderTextColor="#7A7A7A"
-              className="flex-1 text-white text-2xl leading-[34px]"
+              className="flex-1 text-white text-xl leading-[34px]"
               textAlignVertical="top"
             />
           </View>
