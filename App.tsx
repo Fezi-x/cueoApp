@@ -153,26 +153,36 @@ export default function App() {
 
     console.log('4. checking media library permission');
     const mediaPermission = await MediaLibrary.requestPermissionsAsync();
-    console.log('4')
     console.log('4a. media permission result:', JSON.stringify(mediaPermission));
     if (!mediaPermission.granted) {
-      console.log('BAIL: media library permission denied');
-      return;
+      console.log(
+        'Media library permission denied. Recording will continue, but save will be skipped.'
+      );
     }
 
     console.log('5. all permissions granted, starting recording');
     try {
-      isRecordingRef.current = true;
-      setIsRecording(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       console.log('6. haptics done, playing sound');
       await playRecordSound();
       console.log('7. sound done, calling recordAsync');
-      const recording = await cameraRef.current.recordAsync();
+      let recordingPromise: Promise<{ uri: string } | undefined>;
+      try {
+        recordingPromise = cameraRef.current.recordAsync();
+      } catch (e) {
+        console.log('ERROR: recordAsync failed to start:', e);
+        return;
+      }
+      isRecordingRef.current = true;
+      setIsRecording(true);
+      console.log('7a. recordAsync started');
+      const recording = await recordingPromise;
       console.log('8. recordAsync returned:', recording?.uri);
-      if (recording?.uri) {
+      if (recording?.uri && mediaPermission.granted) {
         await MediaLibrary.createAssetAsync(recording.uri);
         console.log('9. saved to media library');
+      } else if (recording?.uri && !mediaPermission.granted) {
+        console.log('9. save skipped (no media permission).');
       }
     } catch (e) {
       console.log('ERROR in recording:', e);
@@ -221,6 +231,10 @@ export default function App() {
               ref={cameraRef}
               className="h-full w-full"
               facing={cameraType}
+              mode="video"
+              onMountError={(event) => {
+                console.log('Camera mount error:', event?.message);
+              }}
             />
             <Pressable
               onPress={() =>
