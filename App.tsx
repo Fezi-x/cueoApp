@@ -9,8 +9,11 @@ import * as MediaLibrary from 'expo-media-library';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View } from 'react-native';
+import type { ScrollView } from 'react-native';
+import CameraPreview from './components/CameraPreview';
+import RecordingControls from './components/RecordingControls';
+import ScriptEditor from './components/ScriptEditor';
 
 const SCROLL_SPEED_PX_PER_SEC = 18;
 
@@ -21,6 +24,12 @@ export default function App() {
   const [script, setScript] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [recordStatus, setRecordStatus] = useState<'idle' | 'pending' | 'recording' | 'error'>(
+    'idle'
+  );
+  const [recordError, setRecordError] = useState('');
+  const [saveNotice, setSaveNotice] = useState('');
+  const [recordElapsedMs, setRecordElapsedMs] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const cameraRef = useRef<CameraView | null>(null);
@@ -30,6 +39,8 @@ export default function App() {
   const rafId = useRef<number | null>(null);
   const recordSound = useRef<Audio.Sound | null>(null);
   const isRecordingRef = useRef(false);
+  const recordStartRef = useRef<number | null>(null);
+  const recordTimerId = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (cameraPermission == null) {
@@ -70,6 +81,34 @@ export default function App() {
       await recordSound.current?.replayAsync();
     } catch {
       // Ignore sound failures to avoid blocking recording.
+    }
+  };
+
+  const requestMediaPermissionWithTimeout = async (timeoutMs: number) => {
+    try {
+      const result = await Promise.race([
+        MediaLibrary.requestPermissionsAsync(),
+        new Promise<MediaLibrary.PermissionResponse>((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                granted: false,
+                canAskAgain: true,
+                status: 'denied',
+                expires: 'never',
+              }),
+            timeoutMs
+          )
+        ),
+      ]);
+      return result;
+    } catch {
+      return {
+        granted: false,
+        canAskAgain: true,
+        status: 'denied',
+        expires: 'never',
+      } as MediaLibrary.PermissionResponse;
     }
   };
 
@@ -122,6 +161,37 @@ export default function App() {
     }
   }, [isRecording, maxOffset]);
 
+  useEffect(() => {
+    if (isRecording) {
+      recordStartRef.current = Date.now();
+      setRecordElapsedMs(0);
+      if (recordTimerId.current) {
+        clearInterval(recordTimerId.current);
+      }
+      recordTimerId.current = setInterval(() => {
+        if (recordStartRef.current) {
+          setRecordElapsedMs(Date.now() - recordStartRef.current);
+        }
+      }, 250);
+    } else {
+      if (recordTimerId.current) {
+        clearInterval(recordTimerId.current);
+        recordTimerId.current = null;
+      }
+      recordStartRef.current = null;
+      setRecordElapsedMs(0);
+    }
+  }, [isRecording]);
+
+  const formatElapsed = (ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const mm = minutes.toString().padStart(2, '0');
+    const ss = seconds.toString().padStart(2, '0');
+    return `${mm}:${ss}`;
+  };
+
   const startRecording = async () => {
     console.log('1. startRecording called');
     if (!cameraRef.current) {
@@ -133,12 +203,16 @@ export default function App() {
       return;
     }
 
+    setRecordError('');
+    setSaveNotice('');
     console.log('2. checking camera permission:', cameraPermission?.granted);
     const ensuredCamera = cameraPermission?.granted
       ? { granted: true }
       : await requestCameraPermission();
     if (!ensuredCamera.granted) {
       console.log('BAIL: camera permission denied');
+      setRecordStatus('error');
+      setRecordError('Camera permission is required to record.');
       return;
     }
 
@@ -148,15 +222,17 @@ export default function App() {
       : await requestMicPermission();
     if (!ensuredMic.granted) {
       console.log('BAIL: mic permission denied');
+      setRecordStatus('error');
+      setRecordError('Microphone permission is required to record.');
       return;
     }
 
     console.log('4. checking media library permission');
-    const mediaPermission = await MediaLibrary.requestPermissionsAsync();
+    const mediaPermission = await requestMediaPermissionWithTimeout(2500);
     console.log('4a. media permission result:', JSON.stringify(mediaPermission));
     if (!mediaPermission.granted) {
       console.log(
-        'Media library permission denied. Recording will continue, but save will be skipped.'
+        'Media library permission denied or timed out. Recording will continue, but save will be skipped.'
       );
     }
 
@@ -175,6 +251,7 @@ export default function App() {
       }
       isRecordingRef.current = true;
       setIsRecording(true);
+      setRecordStatus('recording');
       console.log('7a. recordAsync started');
       const recording = await recordingPromise;
       console.log('8. recordAsync returned:', recording?.uri);
@@ -186,9 +263,12 @@ export default function App() {
       }
     } catch (e) {
       console.log('ERROR in recording:', e);
+      setRecordStatus('error');
+      setRecordError('Recording failed to start. Check permissions and try again.');
     } finally {
       isRecordingRef.current = false;
       setIsRecording(false);
+      setRecordStatus((prev) => (prev === 'error' ? 'error' : 'idle'));
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
@@ -202,121 +282,42 @@ export default function App() {
     <View className="flex-1 bg-black px-5 pt-10">
       <StatusBar style="light" />
 
-      <View className="bg-[#242424] rounded-[32px] h-[400px] mt-6 overflow-hidden">
-        {isLoading && (
-          <View className="flex-1 items-center justify-center px-6">
-            <Text className="text-white text-base text-center">
-              Checking camera permission...
-            </Text>
-          </View>
-        )}
+      <CameraPreview
+        cameraType={cameraType}
+        setCameraType={setCameraType}
+        requestCameraPermission={requestCameraPermission}
+        cameraRef={cameraRef}
+        isLoading={isLoading}
+        isDenied={isDenied}
+        isGranted={isGranted}
+      />
 
-        {isDenied && (
-          <View className="flex-1 items-center justify-center px-6">
-            <Text className="text-white text-base text-center">
-              Camera access is required to preview your shot.
-            </Text>
-            <Pressable
-              onPress={() => requestCameraPermission()}
-              className="mt-4 rounded-full border border-white/40 px-5 py-2"
-            >
-              <Text className="text-white text-sm">Grant Permission</Text>
-            </Pressable>
-          </View>
-        )}
+      <ScriptEditor
+        script={script}
+        setScript={setScript}
+        isEditing={isEditing}
+        setIsEditing={setIsEditing}
+        isRecording={isRecording}
+        scrollRef={scrollRef}
+        setContentHeight={setContentHeight}
+        setViewportHeight={setViewportHeight}
+      />
 
-        {isGranted && (
-          <View className="flex-1">
-            <CameraView
-              ref={cameraRef}
-              className="h-full w-full"
-              facing={cameraType}
-              mode="video"
-              onMountError={(event) => {
-                console.log('Camera mount error:', event?.message);
-              }}
-            />
-            <Pressable
-              onPress={() =>
-                setCameraType((prev) => (prev === 'back' ? 'front' : 'back'))
-              }
-              className="absolute right-3 top-3 h-10 w-10 items-center justify-center rounded-full"
-            >
-              <Ionicons name="camera-reverse" size={30} color="white" />
-            </Pressable>
-          </View>
-        )}
-      </View>
-
-      <Pressable
-        onPress={() => setIsEditing(true)}
-        className={script.length === 0 ? 'bg-[#242424] rounded-[20px] px-6 py-5 mt-6' : 'mt-6'}
-      >
-        {script.length === 0 ? (
-          <Text className="text-yellow-500/30 text-xl text-center">Tap to add your script</Text>
-        ) : (
-          <View className="h-[120px]">
-            <ScrollView
-              ref={(ref) => {
-                scrollRef.current = ref;
-              }}
-              className="flex-1"
-              contentContainerStyle={{
-                justifyContent: isRecording ? 'flex-start' : 'center',
-              }}
-              showsVerticalScrollIndicator={false}
-              bounces={false}
-              scrollEnabled={false}
-              onContentSizeChange={(_, height) => setContentHeight(height)}
-              onLayout={(event) => setViewportHeight(event.nativeEvent.layout.height)}
-            >
-              <Text className="text-white text-2xl leading-[34px] font-bold text-center">
-                {script}
-              </Text>
-            </ScrollView>
-          </View>
-        )}
-      </Pressable>
-
-      <View className="flex-1 items-center justify-end pb-12">
-        <Pressable
-          onPress={isRecording ? stopRecording : startRecording}
-          className="h-20 w-20 items-center justify-center rounded-full border border-white"
-        >
-          <View
-            className={
-              isRecording
-                ? 'h-10 w-10 bg-red-600'
-                : 'h-14 w-14 rounded-full bg-red-600'
-            }
-          />
-        </Pressable>
-      </View>
-
-      <Modal visible={isEditing} animationType="slide" presentationStyle="pageSheet">
-        <View className="flex-1 bg-black">
-          <View className="flex-row items-center justify-between px-5 pt-8 pb-3">
-            <Text className="text-white text-lg">Edit Script</Text>
-            <Pressable
-              onPress={() => setIsEditing(false)}
-              className="px-3 py-1 rounded-full border border-yellow-500"
-            >
-              <Text className="text-yellow-500 text-sm">Done</Text>
-            </Pressable>
-          </View>
-          <View className="flex-1 px-5 pb-10">
-            <TextInput
-              value={script}
-              onChangeText={setScript}
-              multiline
-              placeholder="Paste your script..."
-              placeholderTextColor="#7A7A7A"
-              className="flex-1 text-white text-xl leading-[34px]"
-              textAlignVertical="top"
-            />
-          </View>
-        </View>
-      </Modal>
+      <RecordingControls
+        isRecording={isRecording}
+        recordStatus={recordStatus}
+        recordError={recordError}
+        saveNotice={saveNotice}
+        recordElapsedMs={recordElapsedMs}
+        onRecordPressIn={() => {
+          console.log('record pressed');
+          setRecordStatus('pending');
+          setRecordError('');
+        }}
+        onRecordPress={startRecording}
+        onStopPress={stopRecording}
+        formatElapsed={formatElapsed}
+      />
     </View>
   );
 }
