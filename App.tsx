@@ -15,18 +15,19 @@ import CameraPreview from './components/CameraPreview';
 import RecordingControls from './components/RecordingControls';
 import ScriptEditor from './components/ScriptEditor';
 
-const SCROLL_SPEED_PX_PER_SEC = 18;
+const SCROLL_SPEED_PX_PER_SEC = 20;
 
 export default function App() {
   const [cameraType, setCameraType] = useState<CameraType>('back');
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
+  const [mediaPermission, requestMediaPermission] = MediaLibrary.usePermissions();
   const [script, setScript] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [recordStatus, setRecordStatus] = useState<'idle' | 'pending' | 'recording' | 'error'>(
-    'idle'
-  );
+  const [recordStatus, setRecordStatus] = useState<
+    'idle' | 'pending' | 'recording' | 'saving' | 'error'
+  >('idle');
   const [recordError, setRecordError] = useState('');
   const [saveNotice, setSaveNotice] = useState('');
   const [recordElapsedMs, setRecordElapsedMs] = useState(0);
@@ -41,12 +42,6 @@ export default function App() {
   const isRecordingRef = useRef(false);
   const recordStartRef = useRef<number | null>(null);
   const recordTimerId = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    if (cameraPermission == null) {
-      requestCameraPermission();
-    }
-  }, [cameraPermission, requestCameraPermission]);
 
   // Preload sound on mount + cleanup on unmount
   useEffect(() => {
@@ -72,8 +67,10 @@ export default function App() {
   }, []);
 
   const isLoading = cameraPermission == null;
-  const isDenied = cameraPermission != null && !cameraPermission.granted;
   const isGranted = cameraPermission?.granted === true;
+  const isDenied = cameraPermission?.status === 'denied';
+  const isPrompt = cameraPermission?.status === 'undetermined';
+  const canAskCamera = cameraPermission?.canAskAgain ?? false;
   const maxOffset = Math.max(contentHeight - viewportHeight, 0);
 
   const playRecordSound = async () => {
@@ -81,34 +78,6 @@ export default function App() {
       await recordSound.current?.replayAsync();
     } catch {
       // Ignore sound failures to avoid blocking recording.
-    }
-  };
-
-  const requestMediaPermissionWithTimeout = async (timeoutMs: number) => {
-    try {
-      const result = await Promise.race([
-        MediaLibrary.requestPermissionsAsync(),
-        new Promise<MediaLibrary.PermissionResponse>((resolve) =>
-          setTimeout(
-            () =>
-              resolve({
-                granted: false,
-                canAskAgain: true,
-                status: 'denied',
-                expires: 'never',
-              }),
-            timeoutMs
-          )
-        ),
-      ]);
-      return result;
-    } catch {
-      return {
-        granted: false,
-        canAskAgain: true,
-        status: 'denied',
-        expires: 'never',
-      } as MediaLibrary.PermissionResponse;
     }
   };
 
@@ -227,15 +196,6 @@ export default function App() {
       return;
     }
 
-    console.log('4. checking media library permission');
-    const mediaPermission = await requestMediaPermissionWithTimeout(2500);
-    console.log('4a. media permission result:', JSON.stringify(mediaPermission));
-    if (!mediaPermission.granted) {
-      console.log(
-        'Media library permission denied or timed out. Recording will continue, but save will be skipped.'
-      );
-    }
-
     console.log('5. all permissions granted, starting recording');
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -255,11 +215,28 @@ export default function App() {
       console.log('7a. recordAsync started');
       const recording = await recordingPromise;
       console.log('8. recordAsync returned:', recording?.uri);
-      if (recording?.uri && mediaPermission.granted) {
-        await MediaLibrary.createAssetAsync(recording.uri);
-        console.log('9. saved to media library');
-      } else if (recording?.uri && !mediaPermission.granted) {
+      let canSave = mediaPermission?.granted === true;
+      if (!canSave && mediaPermission?.canAskAgain) {
+        const ensuredMedia = await requestMediaPermission();
+        console.log('4a. media permission result:', JSON.stringify(ensuredMedia));
+        canSave = ensuredMedia?.granted === true;
+      }
+      if (recording?.uri && canSave) {
+        try {
+          setRecordStatus('saving');
+          const asset = await MediaLibrary.createAssetAsync(recording.uri);
+          await MediaLibrary.createAlbumAsync('CUEO', asset, false);
+          console.log('9. saved to media library');
+          setSaveNotice('Saved to Photos');
+        } catch (e) {
+          console.log('ERROR saving to media library:', e);
+          setRecordStatus('error');
+          setRecordError('Could not save. Check Photos permission and storage.');
+        }
+      } else if (recording?.uri && !canSave) {
         console.log('9. save skipped (no media permission).');
+        setRecordStatus('error');
+        setRecordError('Could not save. Allow Photos permission to save.');
       }
     } catch (e) {
       console.log('ERROR in recording:', e);
@@ -279,7 +256,7 @@ export default function App() {
   };
 
   return (
-    <View className="flex-1 bg-black px-5 pt-10">
+    <View className="flex-1 bg-black pt-8">
       <StatusBar style="light" />
 
       <CameraPreview
@@ -290,6 +267,9 @@ export default function App() {
         isLoading={isLoading}
         isDenied={isDenied}
         isGranted={isGranted}
+        isRecording={isRecording}
+        canAskAgain={canAskCamera}
+        isPrompt={isPrompt}
       />
 
       <ScriptEditor
@@ -309,6 +289,8 @@ export default function App() {
         recordError={recordError}
         saveNotice={saveNotice}
         recordElapsedMs={recordElapsedMs}
+        canSaveMedia={mediaPermission?.granted === true}
+        onRequestMediaPermission={requestMediaPermission}
         onRecordPressIn={() => {
           console.log('record pressed');
           setRecordStatus('pending');
@@ -316,6 +298,9 @@ export default function App() {
         }}
         onRecordPress={startRecording}
         onStopPress={stopRecording}
+        onOpenSaved={() => {
+          console.log('open saved videos');
+        }}
         formatElapsed={formatElapsed}
       />
     </View>
