@@ -80,6 +80,7 @@ export default function CameraPreview({
             className="h-full w-full bg-transparent"
             facing={cameraType}
             mode="video"
+            mirror={cameraType === 'front'}
             onCameraReady={() => {
               console.log('Camera ready');
             }}

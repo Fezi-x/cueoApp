@@ -9,15 +9,17 @@ import * as MediaLibrary from 'expo-media-library';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { View, Linking, Platform } from 'react-native';
 import type { ScrollView } from 'react-native';
 import CameraPreview from './components/CameraPreview';
 import RecordingControls from './components/RecordingControls';
 import ScriptEditor from './components/ScriptEditor';
+import * as VideoThumbnails from 'expo-video-thumbnails';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-const SCROLL_SPEED_PX_PER_SEC = 20;
 
 export default function App() {
+  const [scrollSpeed, setScrollSpeed] = useState(20);
   const [cameraType, setCameraType] = useState<CameraType>('back');
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -33,6 +35,9 @@ export default function App() {
   const [recordElapsedMs, setRecordElapsedMs] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
+  const [lastThumbnailUri, setLastThumbnailUri] = useState<string | null>(null);
+  const [lastVideoUri, setLastVideoUri] = useState<string | null>(null);
+
   const cameraRef = useRef<CameraView | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
   const scrollOffset = useRef(0);
@@ -42,6 +47,61 @@ export default function App() {
   const isRecordingRef = useRef(false);
   const recordStartRef = useRef<number | null>(null);
   const recordTimerId = useRef<NodeJS.Timeout | null>(null);
+
+  // Refresh latest video thumbnail
+  const refreshLatestVideo = async () => {
+    // Permission guard: don't even try if not granted or limited
+    if (
+      mediaPermission?.status !== 'granted' &&
+      mediaPermission?.accessPrivileges !== 'all' &&
+      mediaPermission?.accessPrivileges !== 'limited'
+    ) {
+      return;
+    }
+
+    try {
+      const albums = await MediaLibrary.getAlbumsAsync();
+      console.log('FOUND ALBUMS:', albums.map(a => a.title).join(', '));
+      const cueoAlbum = albums.find((a) => a.title === 'CUEO');
+
+      if (!cueoAlbum) {
+        console.log('ALBUM CUEO NOT FOUND');
+        setLastVideoUri(null);
+        setLastThumbnailUri(null);
+        return;
+      }
+
+      const { assets } = await MediaLibrary.getAssetsAsync({
+        album: cueoAlbum.id,
+        sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+        first: 1,
+        mediaType: [MediaLibrary.MediaType.video],
+      });
+
+      console.log(`ASSETS IN CUEO: ${assets.length}`);
+
+      if (assets.length > 0) {
+        const videoAsset = assets[0];
+        console.log('LATEST VIDEO:', videoAsset.uri);
+        setLastVideoUri(videoAsset.uri);
+        try {
+          const { uri } = await VideoThumbnails.getThumbnailAsync(videoAsset.uri, {
+            time: 0,
+          });
+          console.log('THUMBNAIL GEN:', uri);
+          setLastThumbnailUri(uri);
+        } catch (e) {
+          console.log('Thumbnail generation failed:', e);
+        }
+      } else {
+        setLastVideoUri(null);
+        setLastThumbnailUri(null);
+      }
+    } catch (e) {
+      console.log('Error refreshing latest video:', e);
+    }
+    console.log('REFRESH DONE: lastVideoUri=', lastVideoUri);
+  };
 
   // Preload sound on mount + cleanup on unmount
   useEffect(() => {
@@ -65,6 +125,13 @@ export default function App() {
       }
     };
   }, []);
+
+  // Refresh gallery when permission status is resolved or changes
+  useEffect(() => {
+    if (mediaPermission?.status === 'granted' || mediaPermission?.accessPrivileges === 'all' || mediaPermission?.accessPrivileges === 'limited') {
+      refreshLatestVideo();
+    }
+  }, [mediaPermission?.status, mediaPermission?.accessPrivileges]);
 
   const isLoading = cameraPermission == null;
   const isGranted = cameraPermission?.granted === true;
@@ -102,7 +169,7 @@ export default function App() {
       const deltaMs = timestamp - lastFrame.current;
       lastFrame.current = timestamp;
       const nextOffset = Math.min(
-        scrollOffset.current + (SCROLL_SPEED_PX_PER_SEC * deltaMs) / 1000,
+        scrollOffset.current + (scrollSpeed * deltaMs) / 1000,
         currentMaxOffset
       );
       scrollOffset.current = nextOffset;
@@ -119,7 +186,9 @@ export default function App() {
 
   useEffect(() => {
     if (isRecording) {
-      resetScroll();
+      if (rafId.current != null) {
+        cancelAnimationFrame(rafId.current);
+      }
       startAutoScroll(maxOffset);
     } else {
       if (rafId.current != null) {
@@ -128,7 +197,7 @@ export default function App() {
       }
       resetScroll();
     }
-  }, [isRecording, maxOffset]);
+  }, [isRecording, maxOffset, scrollSpeed]);
 
   useEffect(() => {
     if (isRecording) {
@@ -221,20 +290,17 @@ export default function App() {
 
       console.log('8. recordAsync finished:', recording.uri);
 
-      // We attempt to save regardless of the permission check crashing.
-      // In Expo Go, getPermissionsAsync/requestPermissionsAsync can crash 
-      // due to a manifest mismatch for 'AUDIO' permissions on Android 13+.
       try {
         setRecordStatus('saving');
-
-        // Just try to create the asset. If permission is missing, THIS will throw
-        // a standard permission error we can catch.
         const asset = await MediaLibrary.createAssetAsync(recording.uri);
         await MediaLibrary.createAlbumAsync('CUEO', asset, false);
 
         console.log('10. Saved successfully');
         setSaveNotice('Saved to Photos');
         setRecordStatus('idle');
+
+        // Refresh thumbnail after save
+        refreshLatestVideo();
       } catch (e: any) {
         console.log('SAVE ERROR:', e.message);
         setRecordStatus('error');
@@ -252,7 +318,6 @@ export default function App() {
     } finally {
       isRecordingRef.current = false;
       setIsRecording(false);
-      // Ensure we don't overwrite the 'error' status unless it's currently 'saving'
       setRecordStatus((prev) => (prev === 'saving' ? 'idle' : prev));
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -264,57 +329,68 @@ export default function App() {
   };
 
   return (
-    <View className="flex-1 bg-black pt-8">
-      <StatusBar style="light" />
+    <SafeAreaProvider>
+      <View className="flex-1 bg-black pt-8">
+        <StatusBar style="light" />
 
-      <CameraPreview
-        cameraType={cameraType}
-        setCameraType={setCameraType}
-        requestCameraPermission={requestCameraPermission}
-        cameraRef={cameraRef}
-        isLoading={isLoading}
-        isDenied={isDenied}
-        isGranted={isGranted}
-        isRecording={isRecording}
-        canAskAgain={canAskCamera}
-        isPrompt={isPrompt}
-      />
+        <CameraPreview
+          cameraType={cameraType}
+          setCameraType={setCameraType}
+          requestCameraPermission={requestCameraPermission}
+          cameraRef={cameraRef}
+          isLoading={isLoading}
+          isDenied={isDenied}
+          isGranted={isGranted}
+          isRecording={isRecording}
+          canAskAgain={canAskCamera}
+          isPrompt={isPrompt}
+        />
 
-      <ScriptEditor
-        script={script}
-        setScript={setScript}
-        isEditing={isEditing}
-        setIsEditing={setIsEditing}
-        isRecording={isRecording}
-        scrollRef={scrollRef}
-        setContentHeight={setContentHeight}
-        setViewportHeight={setViewportHeight}
-      />
+        <ScriptEditor
+          script={script}
+          setScript={setScript}
+          isEditing={isEditing}
+          setIsEditing={setIsEditing}
+          isRecording={isRecording}
+          scrollRef={scrollRef}
+          setContentHeight={setContentHeight}
+          setViewportHeight={setViewportHeight}
+        />
 
-      <RecordingControls
-        isRecording={isRecording}
-        recordStatus={recordStatus}
-        recordError={recordError}
-        saveNotice={saveNotice}
-        recordElapsedMs={recordElapsedMs}
-        canSaveMedia={
-          mediaPermission?.granted === true ||
-          mediaPermission?.accessPrivileges === 'all' ||
-          mediaPermission?.accessPrivileges === 'limited'
-        }
-        onRequestMediaPermission={requestMediaPermission}
-        onRecordPressIn={() => {
-          console.log('record pressed');
-          setRecordStatus('pending');
-          setRecordError('');
-        }}
-        onRecordPress={startRecording}
-        onStopPress={stopRecording}
-        onOpenSaved={() => {
-          console.log('open saved videos');
-        }}
-        formatElapsed={formatElapsed}
-      />
-    </View>
+        <RecordingControls
+          isRecording={isRecording}
+          recordStatus={recordStatus}
+          recordError={recordError}
+          saveNotice={saveNotice}
+          recordElapsedMs={recordElapsedMs}
+          canSaveMedia={
+            mediaPermission?.granted === true ||
+            mediaPermission?.accessPrivileges === 'all' ||
+            mediaPermission?.accessPrivileges === 'limited'
+          }
+          onRequestMediaPermission={requestMediaPermission}
+          onRecordPressIn={() => {
+            console.log('record pressed');
+            setRecordStatus('pending');
+            setRecordError('');
+          }}
+          onRecordPress={startRecording}
+          onStopPress={stopRecording}
+          onOpenSaved={async () => {
+            console.log('GALLERY CLICK: Opening system gallery');
+            if (Platform.OS === 'ios') {
+              Linking.openURL('photos-redirect://');
+            } else {
+              // Android uses a content URI to trigger the media gallery
+              Linking.openURL('content://media/internal/images/media');
+            }
+          }}
+          formatElapsed={formatElapsed}
+          lastThumbnailUri={lastThumbnailUri}
+          scrollSpeed={scrollSpeed}
+          setScrollSpeed={setScrollSpeed}
+        />
+      </View>
+    </SafeAreaProvider>
   );
 }

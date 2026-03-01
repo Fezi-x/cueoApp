@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View, Image } from 'react-native';
 
 type RecordStatus = 'idle' | 'pending' | 'recording' | 'saving' | 'error';
 
@@ -16,7 +16,11 @@ type RecordingControlsProps = {
   onStopPress: () => void;
   onOpenSaved?: () => void;
   formatElapsed: (ms: number) => string;
+  scrollSpeed: number;
+  setScrollSpeed: (speed: number) => void;
 };
+
+const SPEEDS = [16, 18, 20, 22, 24, 26, 28, 30];
 
 export default function RecordingControls({
   isRecording,
@@ -31,9 +35,19 @@ export default function RecordingControls({
   onStopPress,
   onOpenSaved,
   formatElapsed,
-}: RecordingControlsProps) {
+  lastThumbnailUri,
+  scrollSpeed,
+  setScrollSpeed,
+}: RecordingControlsProps & { lastThumbnailUri?: string | null }) {
   const isSaving = recordStatus === 'saving';
   const isBusy = recordStatus === 'pending' || isSaving;
+
+  const cycleSpeed = () => {
+    const currentIndex = SPEEDS.indexOf(scrollSpeed);
+    const nextIndex = (currentIndex + 1) % SPEEDS.length;
+    setScrollSpeed(SPEEDS[nextIndex]);
+  };
+
   const statusText =
     recordError.length > 0
       ? recordError
@@ -64,26 +78,35 @@ export default function RecordingControls({
       </View>
       <View className="w-full items-center justify-center">
         <Pressable
-          onPress={() => { }}
+          onPress={cycleSpeed}
           hitSlop={10}
           className={[
-            'absolute left-6 h-10 w-10 items-center justify-center rounded-lg',
+            'absolute left-6 h-10 flex-row items-center justify-center rounded-full bg-white/10 px-3',
             isBusy ? 'opacity-50' : 'active:scale-95',
           ].join(' ')}
           disabled={isBusy}
         >
-          <Ionicons name="speedometer-outline" size={25} color="white" />
+          <Ionicons name="speedometer-outline" size={20} color="white" />
+          <Text className="ml-1.5 text-white text-[13px] font-bold tracking-tighter">{scrollSpeed}</Text>
         </Pressable>
         <Pressable
           onPress={canSaveMedia ? onOpenSaved : onRequestMediaPermission}
           hitSlop={10}
           className={[
-            'absolute right-6 h-10 w-10 items-center justify-center rounded-lg border border-white/50',
+            'absolute right-6 h-10 w-10 items-center justify-center rounded-lg border border-white/50 overflow-hidden',
             isBusy ? 'opacity-50' : 'active:scale-95',
           ].join(' ')}
           disabled={isBusy}
         >
-          <Ionicons name="images-outline" size={20} color="white" />
+          {lastThumbnailUri ? (
+            <Image
+              source={{ uri: lastThumbnailUri }}
+              className="h-full w-full"
+              resizeMode="cover"
+            />
+          ) : (
+            <Ionicons name="images-outline" size={20} color="white" />
+          )}
         </Pressable>
         <Pressable
           onPressIn={onRecordPressIn}
