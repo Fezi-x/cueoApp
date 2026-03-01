@@ -96,37 +96,37 @@ export default function ScriptEditor({
       </Pressable>
 
       <Modal visible={isEditing} animationType="slide" presentationStyle="pageSheet">
-        <View className="flex-1 bg-black px-4 pt-6">
+        <View className="flex-1 bg-[#0D0D0D] px-4 pt-6">
           <View className="flex-row items-center justify-between px-1 py-2">
             <Text className="text-white text-[17px] font-semibold">Edit Script</Text>
             <Pressable
               onPress={handleSave}
-              className="flex-row items-center rounded-full border border-white/40 bg-white/10 px-4 py-2 active:scale-95"
+              className="flex-row items-center rounded-full bg-cueoLime px-6 py-2 active:scale-95"
             >
-              <Text className="text-white text-[13px] font-semibold tracking-wide">Save</Text>
+              <Text className="text-black text-[14px] font-bold tracking-wide">Save</Text>
             </Pressable>
           </View>
           <View className="mt-2 flex-row items-center space-x-2 px-1">
             <Pressable
               onPress={handleSelectAll}
-              className="flex-row items-center rounded-full border border-white/40 bg-white/10 px-3 py-2 active:scale-95"
+              className="flex-row items-center rounded-full border border-cueoLime/30 bg-cueoLime/10 px-3 py-2 active:scale-95"
             >
-              <Text className="text-white text-[13px] font-semibold tracking-wide">Select All</Text>
+              <Text className="text-cueoLime text-[13px] font-semibold tracking-wide">Select All</Text>
             </Pressable>
             <Pressable
               onPress={handleClear}
-              className="flex-row items-center rounded-full border border-white/40 bg-white/10 px-3 py-2 active:scale-95"
+              className="flex-row items-center rounded-full border border-white/10 bg-white/5 px-3 py-2 active:scale-95"
             >
-              <Text className="text-white text-[13px] font-semibold tracking-wide">Clear</Text>
+              <Text className="text-white/70 text-[13px] font-semibold tracking-wide">Clear</Text>
             </Pressable>
             <Pressable
               onPress={handlePaste}
-              className="flex-row items-center rounded-full border border-white/40 bg-white/10 px-3 py-2 active:scale-95"
+              className="flex-row items-center rounded-full border border-white/10 bg-white/5 px-3 py-2 active:scale-95"
             >
-              <Text className="text-white text-[13px] font-semibold tracking-wide">Paste All</Text>
+              <Text className="text-white/70 text-[13px] font-semibold tracking-wide">Paste All</Text>
             </Pressable>
           </View>
-          <View className="mt-4 flex-1 rounded-2xl border border-white/10 bg-[#242424] p-5">
+          <View className="mt-4 flex-1 rounded-3xl border border-white/5 bg-[#121212] p-6">
             <TextInput
               ref={(ref) => {
                 inputRef.current = ref;
@@ -135,8 +135,8 @@ export default function ScriptEditor({
               onChangeText={setDraft}
               multiline
               placeholder="Paste your script..."
-              placeholderTextColor="#7A7A7A"
-              className="flex-1 text-white text-[16px] leading-relaxed"
+              placeholderTextColor="#555555"
+              className="flex-1 text-white text-[18px] leading-[1.6]"
               textAlignVertical="top"
               selection={selection}
               onSelectionChange={(event) => setSelection(event.nativeEvent.selection)}

@@ -31,26 +31,32 @@ export default function CameraPreview({
 }: CameraPreviewProps) {
   return (
     <View
-      className="mx-4 mt-6 h-[45%] rounded-3xl bg-[#242424] shadow-sm overflow-hidden"
+      className="mx-4 mt-6 h-[45%] rounded-[40px] bg-[#1A1A1A] shadow-sm overflow-hidden"
       pointerEvents="box-none"
     >
       {isLoading && (
-        <View className="flex-1 items-center justify-center px-6">
-          <Text className="text-white text-[16px] leading-relaxed text-center">
+        <View className="flex-1 items-center justify-center px-8">
+          <Text className="text-cueoLime text-[24px] font-bold leading-tight text-center">
+            You don’t need more content.
+          </Text>
+          <Text className="text-white/50 text-[14px] mt-2 text-center">
             Camera access is required to preview your shot.
           </Text>
           <Pressable
             onPress={() => requestCameraPermission()}
-            className="mt-4 rounded-full border border-white/30 px-5 py-2 active:scale-95"
+            className="mt-6 rounded-full bg-cueoLime px-8 py-3 active:scale-95"
           >
-            <Text className="text-white text-[13px] tracking-wide">Enable Camera</Text>
+            <Text className="text-black text-[15px] font-bold tracking-wide">Enable Camera</Text>
           </Pressable>
         </View>
       )}
 
       {(isDenied || isPrompt) && (
-        <View className="flex-1 items-center justify-center px-6">
-          <Text className="text-white text-[16px] leading-relaxed text-center">
+        <View className="flex-1 items-center justify-center px-8">
+          <Text className="text-cueoLime text-[24px] font-bold leading-tight text-center">
+            You don’t need more content.
+          </Text>
+          <Text className="text-white/50 text-[14px] mt-2 text-center">
             Camera access is required to preview your shot.
           </Text>
           <Pressable
@@ -64,9 +70,9 @@ export default function CameraPreview({
                 Linking.openSettings();
               }
             }}
-            className="mt-4 rounded-full border border-white/30 px-5 py-2 active:scale-95"
+            className="mt-6 rounded-full bg-cueoLime px-8 py-3 active:scale-95"
           >
-            <Text className="text-white text-[13px] tracking-wide">
+            <Text className="text-black text-[15px] font-bold tracking-wide">
               {canAskAgain ? 'Enable Camera' : 'Open Settings'}
             </Text>
           </Pressable>

@@ -62,7 +62,7 @@ export default function RecordingControls({
     recordError.length > 0
       ? 'text-red-400'
       : saveNotice.length > 0
-        ? 'text-white/50'
+        ? 'text-cueoLime'
         : 'text-white/70';
   return (
     <View className="absolute bottom-12 w-full items-center px-2">
@@ -81,13 +81,13 @@ export default function RecordingControls({
           onPress={cycleSpeed}
           hitSlop={10}
           className={[
-            'absolute left-6 h-10 flex-row items-center justify-center rounded-full bg-white/10 px-3',
+            'absolute left-6 h-10 flex-row items-center justify-center rounded-full bg-cueoLime/10 px-4 border border-cueoLime/20',
             isBusy ? 'opacity-50' : 'active:scale-95',
           ].join(' ')}
           disabled={isBusy}
         >
-          <Ionicons name="speedometer-outline" size={20} color="white" />
-          <Text className="ml-1.5 text-white text-[13px] font-bold tracking-tighter">{scrollSpeed}</Text>
+          <Ionicons name="speedometer-outline" size={18} color="#DFFF00" />
+          <Text className="ml-1.5 text-cueoLime text-[14px] font-bold tracking-tighter">{scrollSpeed}</Text>
         </Pressable>
         <Pressable
           onPress={canSaveMedia ? onOpenSaved : onRequestMediaPermission}
@@ -113,15 +113,16 @@ export default function RecordingControls({
           onPress={isRecording ? onStopPress : onRecordPress}
           hitSlop={12}
           className={[
-            'h-16 w-16 items-center justify-center rounded-full border-4 shadow-sm active:scale-95',
-            isRecording ? 'bg-red-500' : 'bg-white',
+            'h-20 w-20 items-center justify-center rounded-full border-[6px] shadow-lg active:scale-95',
+            isRecording ? 'bg-red-500 border-white/30 shadow-cueoLime/40' : 'bg-white border-black/10 shadow-black/20',
             isBusy ? 'opacity-60' : '',
           ].join(' ')}
           disabled={isBusy}
+          style={isRecording ? { shadowColor: '#DFFF00', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 10, elevation: 10 } : {}}
         >
           <Ionicons
-            name={isRecording ? 'stop-circle-outline' : 'radio-button-on-outline'}
-            size={32}
+            name={isRecording ? 'stop' : 'radio-button-on'}
+            size={38}
             color={isRecording ? 'white' : '#EF4444'}
           />
         </Pressable>
