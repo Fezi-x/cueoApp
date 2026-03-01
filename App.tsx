@@ -214,38 +214,46 @@ export default function App() {
       setRecordStatus('recording');
       console.log('7a. recordAsync started');
       const recording = await recordingPromise;
-      console.log('8. recordAsync returned:', recording?.uri);
-      let canSave = mediaPermission?.granted === true;
-      if (!canSave && mediaPermission?.canAskAgain) {
-        const ensuredMedia = await requestMediaPermission();
-        console.log('4a. media permission result:', JSON.stringify(ensuredMedia));
-        canSave = ensuredMedia?.granted === true;
+      if (!recording?.uri) {
+        console.log('9. No recording URI found');
+        return;
       }
-      if (recording?.uri && canSave) {
-        try {
-          setRecordStatus('saving');
-          const asset = await MediaLibrary.createAssetAsync(recording.uri);
-          await MediaLibrary.createAlbumAsync('CUEO', asset, false);
-          console.log('9. saved to media library');
-          setSaveNotice('Saved to Photos');
-        } catch (e) {
-          console.log('ERROR saving to media library:', e);
-          setRecordStatus('error');
-          setRecordError('Could not save. Check Photos permission and storage.');
-        }
-      } else if (recording?.uri && !canSave) {
-        console.log('9. save skipped (no media permission).');
+
+      console.log('8. recordAsync finished:', recording.uri);
+
+      // We attempt to save regardless of the permission check crashing.
+      // In Expo Go, getPermissionsAsync/requestPermissionsAsync can crash 
+      // due to a manifest mismatch for 'AUDIO' permissions on Android 13+.
+      try {
+        setRecordStatus('saving');
+
+        // Just try to create the asset. If permission is missing, THIS will throw
+        // a standard permission error we can catch.
+        const asset = await MediaLibrary.createAssetAsync(recording.uri);
+        await MediaLibrary.createAlbumAsync('CUEO', asset, false);
+
+        console.log('10. Saved successfully');
+        setSaveNotice('Saved to Photos');
+        setRecordStatus('idle');
+      } catch (e: any) {
+        console.log('SAVE ERROR:', e.message);
         setRecordStatus('error');
-        setRecordError('Could not save. Allow Photos permission to save.');
+
+        if (e.message.includes('permission') || e.message.includes('Permission')) {
+          setRecordError('Save failed: Missing Photos permission.');
+        } else {
+          setRecordError('Save failed: Could not write to gallery.');
+        }
       }
     } catch (e) {
-      console.log('ERROR in recording:', e);
+      console.log('CRITICAL ERROR in recording flow:', e);
       setRecordStatus('error');
-      setRecordError('Recording failed to start. Check permissions and try again.');
+      setRecordError('Recording failed. Please try again.');
     } finally {
       isRecordingRef.current = false;
       setIsRecording(false);
-      setRecordStatus((prev) => (prev === 'error' ? 'error' : 'idle'));
+      // Ensure we don't overwrite the 'error' status unless it's currently 'saving'
+      setRecordStatus((prev) => (prev === 'saving' ? 'idle' : prev));
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
@@ -289,7 +297,11 @@ export default function App() {
         recordError={recordError}
         saveNotice={saveNotice}
         recordElapsedMs={recordElapsedMs}
-        canSaveMedia={mediaPermission?.granted === true}
+        canSaveMedia={
+          mediaPermission?.granted === true ||
+          mediaPermission?.accessPrivileges === 'all' ||
+          mediaPermission?.accessPrivileges === 'limited'
+        }
         onRequestMediaPermission={requestMediaPermission}
         onRecordPressIn={() => {
           console.log('record pressed');

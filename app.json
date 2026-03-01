@@ -24,11 +24,8 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
@@ -36,6 +33,24 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.cueoApp"
     },
+    "plugins": [
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow CUEO to save videos to your photo library.",
+          "savePhotosPermission": "Allow CUEO to save videos to your photo library.",
+          "isMultipleSelectionEnabled": true
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow CUEO to access your camera to record videos.",
+          "microphonePermission": "Allow CUEO to access your microphone for recording sound."
+        }
+      ],
+      "expo-av"
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     }
